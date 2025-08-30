@@ -1,11 +1,12 @@
 use axum::{
     Router,
     extract::{
-        ConnectInfo, WebSocketUpgrade,
+        WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     response::IntoResponse,
     routing::get,
+    http::{HeaderMap, StatusCode},
 };
 use std::net::SocketAddr;
 
@@ -26,8 +27,37 @@ async fn health() -> impl IntoResponse {
     "ok"
 }
 
-async fn before_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(ws_handler)
+async fn before_ws(headers: HeaderMap, ws: WebSocketUpgrade) -> impl IntoResponse {
+    // Hardcoded bearer token for authentication
+    const VALID_TOKEN: &str = "secret-websocket-token";
+    
+    // Extract the Authorization header
+    let auth_header = headers.get("authorization");
+    
+    // Check if the Authorization header is present and valid
+    match auth_header {
+        Some(header_value) => {
+            let auth_str = header_value.to_str().unwrap_or("");
+            
+            // Check if it starts with "Bearer " and extract the token
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                if token == VALID_TOKEN {
+                    // Valid token, proceed with WebSocket upgrade
+                    ws.on_upgrade(ws_handler)
+                } else {
+                    // Invalid token
+                    (StatusCode::UNAUTHORIZED, "Invalid bearer token").into_response()
+                }
+            } else {
+                // Authorization header doesn't start with "Bearer "
+                (StatusCode::UNAUTHORIZED, "Invalid authorization header format").into_response()
+            }
+        }
+        None => {
+            // No Authorization header present
+            (StatusCode::UNAUTHORIZED, "Missing authorization header").into_response()
+        }
+    }
 }
 
 async fn ws_handler(mut socket: WebSocket) {
